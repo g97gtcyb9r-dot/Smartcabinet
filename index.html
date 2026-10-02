@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SmartCabinet — Distinta Mobile</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f7;margin:0;color:#171717}
+header{background:#fff;padding:15px;border-bottom:1px solid #ddd;position:sticky;top:0;z-index:5}
+h1{font-size:20px;margin:0 0 4px}.sub,.small{font-size:12px;color:#666}
+main{max-width:900px;margin:auto;padding:12px 12px 90px}.card{background:#fff;border-radius:16px;padding:14px;margin:10px 0}
+button,.filebtn{border:0;border-radius:12px;padding:12px 14px;background:#111;color:white;font-weight:600;font-size:15px}
+.secondary{background:#e9e9ee;color:#111}.green{background:#18864b}
+input[type=text]{width:100%;padding:13px;border:1px solid #ccc;border-radius:12px;font-size:16px}
+input[type=file]{display:none}.row{display:flex;gap:8px;flex-wrap:wrap}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{background:#f0f0f3;border-radius:12px;padding:10px;text-align:center}
+.num{font-size:22px;font-weight:700}.item{display:flex;gap:10px;border:1px solid #ddd;border-radius:14px;padding:12px;margin:8px 0}
+.item.done{background:#edf8f1;border-color:#9ad0ad}.check{width:28px;height:28px;accent-color:#18864b}
+.name{font-weight:700}.meta{font-size:13px;color:#555;line-height:1.5}
+.code{font:11px ui-monospace,monospace;color:#666;word-break:break-all}
+.pill{background:#eee;border-radius:99px;padding:4px 8px;font-size:12px}.hidden{display:none!important}
+#reader{max-width:500px;margin:auto;overflow:hidden;border-radius:14px}
+footer{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #ddd;padding:10px;display:flex;gap:8px;z-index:6}
+footer button{flex:1}
+</style>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Distinta Mobile">
+<link rel="apple-touch-icon" href="icon-180.png">
+
+</head>
+<body>
+<header><h1>SmartCabinet — Distinta Mobile</h1><div class="sub">Distinta • ricerca • Data Matrix • spunta pezzi</div></header>
+<main>
+<section class="card">
+<div class="row">
+<label class="filebtn" for="csv">📄 Carica CSV SmartCabinet</label>
+<input id="csv" type="file" accept=".csv,text/csv">
+<button class="secondary" id="demo">Usa distinta demo</button>
+<button class="secondary" id="reset">Azzera spunte</button>
+</div>
+<p class="small">Usa il CSV generato da SmartCabinet, ad esempio <b>UGOLINI NICCHIA.CSV</b>.</p>
+</section>
+<section class="card"><div class="stats">
+<div class="stat"><div class="num" id="tot">0</div>pezzi</div>
+<div class="stat"><div class="num" id="done">0</div>completati</div>
+<div class="stat"><div class="num" id="left">0</div>da fare</div>
+</div></section>
+<section class="card"><input id="search" type="text" placeholder="🔎 Cerca pezzo, programma, materiale, dimensione..."></section>
+<section class="card">
+<button id="scan" class="green" style="width:100%">📷 Scansiona Data Matrix</button>
+<div id="scanner" class="hidden">
+<div id="reader"></div><div id="result" style="font-weight:700;margin-top:8px"></div>
+<button id="stop" class="secondary" style="width:100%;margin-top:8px">Chiudi fotocamera</button>
+</div>
+</section>
+<section class="card"><div style="display:flex;justify-content:space-between"><b>Distinta</b><span id="filter" class="pill">tutti</span></div><div id="list"></div></section>
+</main>
+<footer><button id="all">Tutti</button><button id="todo" class="secondary">Da fare</button><button id="completed" class="secondary">Completati</button></footer>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+let rows=[],mode="all",scanner=null;
+const demo=[
+["MULTI BIA",1,1928,649,18,"FS","UGOLINI NICCHIA-FS.CIX"],
+["MULTI BIA",1,1928,649,18,"FD","UGOLINI NICCHIA-FD.CIX"],
+["MULTI BIA",1,1916,649,18,"DOWN-1","UGOLINI NICCHIA-DOWN-1.CIX"],
+["MULTI BIA",1,1380,649,18,"DOWN-2","UGOLINI NICCHIA-DOWN-2.CIX"],
+["MULTI BIA",1,1916,649,18,"UP-1","UGOLINI NICCHIA-UP-1.CIX"],
+["MULTI BIA",1,1380,649,18,"UP-2","UGOLINI NICCHIA-UP-2.CIX"],
+["MULTI BIA",1,1380,649,18,"DIV-V1A","UGOLINI NICCHIA-DIV-V1A.CIX"],
+["MULTI BIA",1,1916,649,18,"DIV-H1A","UGOLINI NICCHIA-DIV-H1A.CIX"],
+["MULTI BIA",1,1916,628,18,"SHELF-1","UGOLINI NICCHIA-SHELF-1.CIX"],
+["MULTI BIA",1,1916,628,18,"SHELF-2","UGOLINI NICCHIA-SHELF-2.CIX"]
+].map(x=>({materiale:x[0],quantita:x[1],lunghezza:x[2],larghezza:x[3],spessore:x[4],tipo:x[5],programma:x[6]}));
+
+function parseCSV(t){
+ t=t.replace(/^\uFEFF/,'');let ls=t.split(/\r?\n/).filter(x=>x.trim());if(!ls.length)return[];
+ let sep=(ls[0].split(';').length>ls[0].split(',').length)?';':',';
+ const p=s=>{let a=[],v="",q=false;for(let i=0;i<s.length;i++){let c=s[i];if(c=='"'&&s[i+1]=='"'){v+='"';i++;continue}if(c=='"'){q=!q;continue}if(c==sep&&!q){a.push(v.trim());v=""}else v+=c}a.push(v.trim());return a};
+ let h=p(ls[0]).map(x=>x.toLowerCase().replace(/\s+/g,"_"));
+ return ls.slice(1).map(l=>{let a=p(l),o={};h.forEach((k,i)=>o[k]=a[i]??"");
+ o.tipo=o.tipo_pezzo||o.tipo||"";o.programma=o.programma||"";o.quantita=o.quantita||o.quantità||"";
+ return o}).filter(o=>Object.values(o).some(v=>String(v).trim()));
+}
+function norm(s){return String(s||"").toLowerCase().trim().replace(/\\/g,"/").split("/").pop().replace(/[–—]/g,"-").replace(/\s+/g," ")}
+function stem(s){return norm(s).replace(/\.[^.]+$/,"")}
+function suffix(s){let x=stem(s),p=x.lastIndexOf("-");return p>=0?x.slice(p+1):x}
+function matches(code){
+ let k=norm(code),s=stem(code),z=suffix(code);
+ let m=rows.filter(r=>norm(r.programma)===k);if(m.length)return m;
+ m=rows.filter(r=>stem(r.programma)===s);if(m.length)return m;
+ return rows.filter(r=>suffix(r.programma)===z);
+}
+function key(r,i){return stem(r.programma||r.tipo||("row"+i))}
+function done(r,i){return localStorage.getItem("sc_"+key(r,i))==="1"}
+function setdone(r,i,v){localStorage.setItem("sc_"+key(r,i),v?"1":"0")}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function render(){
+ let q=document.getElementById("search").value.toLowerCase().trim();
+ let a=rows.map((r,i)=>({r,i})).filter(x=>{let b=Object.values(x.r).join(" ").toLowerCase();return(!q||b.includes(q))&&(mode=="all"||(mode=="done"?done(x.r,x.i):!done(x.r,x.i)))});
+ document.getElementById("list").innerHTML=a.map(x=>{let r=x.r,i=x.i,d=done(r,i);
+ return `<div class="item ${d?"done":""}"><input class="check" type="checkbox" data-i="${i}" ${d?"checked":""}>
+ <div><div class="name">${esc(r.tipo||"Pezzo")} ${d?"✓":""}</div>
+ <div class="meta">${esc(r.lunghezza||"?")} × ${esc(r.larghezza||"?")} × ${esc(r.spessore||"?")} mm · ${esc(r.materiale||"n/d")} · q.tà ${esc(r.quantita||"1")}</div>
+ <div class="code">${esc(r.programma||"programma non indicato")}</div></div></div>`}).join("")||"<p class='small'>Nessun pezzo trovato.</p>";
+ document.querySelectorAll(".check").forEach(c=>c.onchange=()=>{let i=+c.dataset.i;setdone(rows[i],i,c.checked);render()});
+ let n=rows.length,d=rows.reduce((a,r,i)=>a+(done(r,i)?1:0),0);
+ tot.textContent=n;done.textContent=d;left.textContent=n-d;filter.textContent=mode=="all"?"tutti":mode=="done"?"completati":"da fare";
+}
+function load(r){rows=r;render()}
+csv.onchange=e=>{let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>load(parseCSV(r.result));r.readAsText(f,"UTF-8")}
+demo.onclick=()=>load(demo);reset.onclick=()=>{rows.forEach((r,i)=>setdone(r,i,false));render()};search.oninput=render;
+all.onclick=()=>{mode="all";render()};todo.onclick=()=>{mode="todo";render()};completed.onclick=()=>{mode="done";render()};
+
+async function stopCam(){if(scanner){try{await scanner.stop()}catch(e){}try{scanner.clear()}catch(e){}scanner=null}document.getElementById("scanner").classList.add("hidden")}
+stop.onclick=stopCam;
+scan.onclick=async()=>{
+ if(!window.Html5Qrcode){alert("Lettore non disponibile: apri la pagina con internet attivo.");return}
+ document.getElementById("scanner").classList.remove("hidden");result.textContent="Inquadra il Data Matrix…";
+ scanner=new Html5Qrcode("reader");
+ try{
+ await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:260,height:180},formatsToSupport:[Html5QrcodeSupportedFormats.DATA_MATRIX,Html5QrcodeSupportedFormats.QR_CODE]},
+ async code=>{
+  result.textContent="Letto: "+code;let m=matches(code);
+  if(m.length===1){let i=rows.indexOf(m[0]);setdone(m[0],i,true);mode="all";search.value="";render();setTimeout(stopCam,700)}
+  else if(m.length>1) result.textContent="Codice letto: più pezzi compatibili ("+m.map(x=>x.tipo).join(", ")+")";
+  else result.textContent="Codice letto ma non trovato nella distinta.";
+ },()=>{});
+ }catch(e){result.textContent="Fotocamera non disponibile: "+e}
+};
+load(demo);
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+
+</body></html>
